@@ -28,7 +28,7 @@ template <bool SAME_KV_STRIDES, uint32_t CTA_TILE_Q, uint32_t HEAD_DIM_QK, uint3
           typename AttentionVariant, typename Params>
 cudaError_t BatchPrefillWithPagedKVCacheDispatched(Params params, typename Params::DTypeO* tmp_v,
                                                    float* tmp_s, bool enable_pdl,
-                                                   cudaStream_t stream);
+                                                   cudaStream_t stream, bool resource_cap);
 
 }  // namespace flashinfer
 

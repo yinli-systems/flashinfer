@@ -4368,7 +4368,7 @@ template <uint32_t CTA_TILE_Q, uint32_t HEAD_DIM_QK, uint32_t HEAD_DIM_VO,
           typename AttentionVariant, typename Params>
 cudaError_t BatchPrefillWithRaggedKVCacheDispatched(Params params, typename Params::DTypeO* tmp_v,
                                                     float* tmp_s, bool enable_pdl,
-                                                    cudaStream_t stream) {
+                                                    cudaStream_t stream, bool resource_cap) {
   using DTypeQ = typename Params::DTypeQ;
   using DTypeKV = typename Params::DTypeKV;
   using DTypeO = typename Params::DTypeO;
@@ -4459,6 +4459,12 @@ cudaError_t BatchPrefillWithRaggedKVCacheDispatched(Params params, typename Para
   // cudaFuncSetAttribute fail with cudaErrorInvalidValue. Clamp to the legal
   // per-block maximum so a config in that gap selects a smaller NUM_MMA_KV
   // instead of failing the launch.
+  // Optional resource tactic. It changes launch residency only; kernel math and work order stay
+  // fixed.
+  const bool resource_cap_eligible =
+      HEAD_DIM_QK == 128 && HEAD_DIM_VO == 128 && CTA_TILE_Q == 128 && sizeof(DTypeQ) == 2 &&
+      sizeof(DTypeKV) == 2 && AttentionVariant::use_softmax && tmp_v == nullptr &&
+      max_smem_per_sm == 102400 && max_smem_per_block_optin >= 65536;
   const int max_smem_per_threadblock =
       min(max_smem_per_sm / num_ctas_per_sm, max_smem_per_block_optin);
 
@@ -4500,6 +4506,12 @@ cudaError_t BatchPrefillWithRaggedKVCacheDispatched(Params params, typename Para
                                                  typename KTraits::SharedStoragePaged,
                                                  typename KTraits::SharedStorage>;
           size_t smem_size = sizeof(SmemStorage);
+          if (resource_cap && resource_cap_eligible && smem_size == 49152) {
+            smem_size = 65536;
+          }
+          const size_t max_configured_smem =
+              resource_cap_eligible ? std::max<size_t>(smem_size, 65536) : smem_size;
+
           auto kernel = BatchPrefillWithRaggedKVCacheKernel<KTraits, Params>;
           // Exact final check: the analytic NUM_MMA_KV budget can slightly
           // under-count the real struct (cross-warp merge buffers, padding);
@@ -4513,8 +4525,8 @@ cudaError_t BatchPrefillWithRaggedKVCacheDispatched(Params params, typename Para
                     << " bytes); this configuration is not supported on this architecture.";
             FLASHINFER_ERROR(err_msg.str());
           }
-          FLASHINFER_CUDA_CALL(
-              cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+          FLASHINFER_CUDA_CALL(cudaFuncSetAttribute(
+              kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, max_configured_smem));
           // PDL launch config
           cudaLaunchAttribute attribute[1];
           cudaLaunchConfig_t config;
@@ -4573,7 +4585,7 @@ template <bool SAME_KV_STRIDES, uint32_t CTA_TILE_Q, uint32_t HEAD_DIM_QK, uint3
           typename AttentionVariant, typename Params>
 cudaError_t BatchPrefillWithPagedKVCacheDispatched(Params params, typename Params::DTypeO* tmp_v,
                                                    float* tmp_s, bool enable_pdl,
-                                                   cudaStream_t stream) {
+                                                   cudaStream_t stream, bool resource_cap) {
   using DTypeQ = typename Params::DTypeQ;
   using DTypeKV = typename Params::DTypeKV;
   using DTypeO = typename Params::DTypeO;
@@ -4655,6 +4667,12 @@ cudaError_t BatchPrefillWithPagedKVCacheDispatched(Params params, typename Param
       (sizeof(DTypeKV) == 1 && NUM_WARPS_Q > 2) ? (NUM_WARPS_Q / 2) : 1;
   const int num_ctas_per_sm =
       max_smem_per_sm >= 2 * (kFixedSmem + kMinValidMmaKV * kKVSmemPerMmaKV) ? 2 : 1;
+  // Optional resource tactic. It changes launch residency only; kernel math and work order stay
+  // fixed.
+  const bool resource_cap_eligible =
+      HEAD_DIM_QK == 128 && HEAD_DIM_VO == 128 && CTA_TILE_Q == 128 && sizeof(DTypeQ) == 2 &&
+      sizeof(DTypeKV) == 2 && AttentionVariant::use_softmax && tmp_v == nullptr &&
+      max_smem_per_sm == 102400 && max_smem_per_block_optin >= 65536;
   const int max_smem_per_threadblock =
       min(max_smem_per_sm / num_ctas_per_sm, max_smem_per_block_optin);
 
@@ -4693,6 +4711,12 @@ cudaError_t BatchPrefillWithPagedKVCacheDispatched(Params params, typename Param
           FLASHINFER_ERROR(err_msg.str());
         } else {
           size_t smem_size = sizeof(typename KTraits::SharedStoragePaged);
+          if (resource_cap && resource_cap_eligible && smem_size == 49152) {
+            smem_size = 65536;
+          }
+          const size_t max_configured_smem =
+              resource_cap_eligible ? std::max<size_t>(smem_size, 65536) : smem_size;
+
           auto kernel = BatchPrefillWithPagedKVCacheKernel<SAME_KV_STRIDES, KTraits, Params>;
           // Exact final check: the analytic NUM_MMA_KV budget can slightly
           // under-count the real struct (cross-warp merge buffers, padding);
@@ -4706,8 +4730,8 @@ cudaError_t BatchPrefillWithPagedKVCacheDispatched(Params params, typename Param
                     << " bytes); this configuration is not supported on this architecture.";
             FLASHINFER_ERROR(err_msg.str());
           }
-          FLASHINFER_CUDA_CALL(
-              cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+          FLASHINFER_CUDA_CALL(cudaFuncSetAttribute(
+              kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, max_configured_smem));
           // PDL launch config
           cudaLaunchAttribute attribute[1];
           cudaLaunchConfig_t config;

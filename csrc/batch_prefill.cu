@@ -28,14 +28,14 @@ template <bool SAME_KV_STRIDES, uint32_t CTA_TILE_Q, uint32_t HEAD_DIM_QK, uint3
           typename AttentionVariant, typename Params>
 cudaError_t BatchPrefillWithPagedKVCacheDispatched(Params params, typename Params::DTypeO* tmp_v,
                                                    float* tmp_s, bool enable_pdl,
-                                                   cudaStream_t stream);
+                                                   cudaStream_t stream, bool resource_cap);
 
 template <uint32_t CTA_TILE_Q, uint32_t HEAD_DIM_QK, uint32_t HEAD_DIM_VO,
           PosEncodingMode POS_ENCODING_MODE, bool USE_FP16_QK_REDUCTION, MaskMode MASK_MODE,
           typename AttentionVariant, typename Params>
 cudaError_t BatchPrefillWithRaggedKVCacheDispatched(Params params, typename Params::DTypeO* tmp_v,
                                                     float* tmp_s, bool enable_pdl,
-                                                    cudaStream_t stream);
+                                                    cudaStream_t stream, bool resource_cap);
 
 }  // namespace flashinfer
 
@@ -50,7 +50,8 @@ Array<int64_t> BatchPrefillWithKVCachePlan(
     TensorView kv_len_arr, int64_t total_num_rows, int64_t batch_size, int64_t num_qo_heads,
     int64_t num_kv_heads, int64_t page_size, bool enable_cuda_graph, int64_t head_dim_qk,
     int64_t head_dim_vo, bool causal, int64_t window_left, int64_t fixed_split_size,
-    bool disable_split_kv, int64_t num_colocated_ctas = 0, int64_t uniform_q_len = 0) {
+    bool disable_split_kv, int64_t num_colocated_ctas = 0, int64_t uniform_q_len = 0,
+    bool resource_cap = false) {
   size_t float_workspace_size_in_bytes =
       float_workspace_buffer.size(0) * get_element_size(float_workspace_buffer);
   size_t int_workspace_size_in_bytes =
@@ -72,6 +73,7 @@ Array<int64_t> BatchPrefillWithKVCachePlan(
   TVM_FFI_ICHECK(status == cudaSuccess)
       << "Failed to plan prefill with error: " << cudaGetErrorString(status);
 
+  plan_info.resource_cap = resource_cap;
   return Array(plan_info.ToVector());
 }
 
@@ -225,7 +227,7 @@ void BatchPrefillWithRaggedKVCacheRun(TensorView float_workspace_buffer,
           status = flashinfer::BatchPrefillWithRaggedKVCacheDispatched<
               CTA_TILE_Q, HEAD_DIM_QK, HEAD_DIM_VO, POS_ENCODING_MODE,
               /*use_fp16_qk_reduction=*/USE_FP16_QK_REDUCTION, MASK_MODE, AttentionVariant,
-              RaggedParams>(params, tmp_v, tmp_s, enable_pdl, stream);
+              RaggedParams>(params, tmp_v, tmp_s, enable_pdl, stream, plan_info.resource_cap);
         });
 
         TVM_FFI_ICHECK(status == cudaSuccess)

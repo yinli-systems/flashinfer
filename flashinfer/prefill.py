@@ -2558,6 +2558,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
         max_sequence_kv: Optional[int] = None,
         fixed_split_size: Optional[int] = None,
         disable_split_kv: bool = False,
+        resource_cap: bool = False,
     ) -> None:
         r"""Plan batch prefill/append attention on Paged KV-Cache for given problem specification.
 
@@ -2670,6 +2671,10 @@ class BatchPrefillWithPagedKVCacheWrapper:
             and lead to a varied number of launched CTAs.
         disable_split_kv : bool,
             Whether to disable the split-kv for determinism in CUDA Graph, defaults to ``False``.
+        resource_cap : bool,
+            Whether to opt into the FA2 shared-memory residency tactic. The default is
+            ``False`` and preserves the native launch. This option is supported only by
+            the FA2 backend and is intended for runtime/autotuner selection.
         Note
         ----
         The :meth:`plan` method should be called before any :meth:`run` or
@@ -2702,6 +2707,11 @@ class BatchPrefillWithPagedKVCacheWrapper:
             head_dim_vo = head_dim_qk
         if fixed_split_size is None:
             fixed_split_size = -1
+
+        if resource_cap and self._backend != "fa2":
+            raise NotImplementedError(
+                "resource_cap is supported only by the FA2 prefill backend"
+            )
 
         batch_size = len(qo_indptr) - 1
         self._batch_size = batch_size
@@ -3050,6 +3060,7 @@ class BatchPrefillWithPagedKVCacheWrapper:
                 args.append(disable_split_kv)  # disable_split_kv
                 args.append(0)  # num_colocated_ctas
                 args.append(0)  # uniform_q_len
+                args.append(resource_cap)  # resource_cap
             self._plan_info = self._cached_module.plan(
                 *args,
             )
@@ -4278,6 +4289,7 @@ class BatchPrefillWithRaggedKVCacheWrapper:
         max_item_len_ptr: Optional[torch.Tensor] = None,
         fixed_split_size: Optional[int] = None,
         disable_split_kv: bool = False,
+        resource_cap: bool = False,
         seq_lens: Optional[torch.Tensor] = None,
         seq_lens_q: Optional[torch.Tensor] = None,
         max_token_per_sequence: Optional[int] = None,
@@ -4381,6 +4393,10 @@ class BatchPrefillWithRaggedKVCacheWrapper:
             and lead to a varied number of launched CTAs.
         disable_split_kv : bool,
             Whether to disable the split-kv for determinism in CUDA Graph, defaults to ``False``.
+        resource_cap : bool,
+            Whether to opt into the FA2 shared-memory residency tactic. The default is
+            ``False`` and preserves the native launch. This option is supported only by
+            the FA2 backend and is intended for runtime/autotuner selection.
         seq_lens: Optional[torch.Tensor]
             Only used by the cudnn backend. A 1D int32 tensor with the kv sequence length
             of each prompt, shape: ``[batch_size]``. Optional: cuDNN derives it from ``kv_indptr``.
@@ -4424,6 +4440,11 @@ class BatchPrefillWithRaggedKVCacheWrapper:
             fixed_split_size = -1
         if logits_soft_cap is None:
             logits_soft_cap = 0.0
+
+        if resource_cap and self._backend != "fa2":
+            raise NotImplementedError(
+                "resource_cap is supported only by the FA2 prefill backend"
+            )
 
         batch_size = len(qo_indptr) - 1
         if len(kv_indptr) != batch_size + 1:
@@ -5005,6 +5026,7 @@ class BatchPrefillWithRaggedKVCacheWrapper:
                 args.append(disable_split_kv)  # disable_split_kv
                 args.append(0)  # num_colocated_ctas
                 args.append(0)  # uniform_q_len
+                args.append(resource_cap)  # resource_cap
             self._plan_info = self._cached_module.plan(
                 *args,
             )

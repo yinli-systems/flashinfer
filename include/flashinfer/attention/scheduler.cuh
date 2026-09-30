@@ -698,6 +698,7 @@ struct PrefillPlanInfo {
   int64_t block_valid_mask_offset;
   bool enable_cuda_graph;
   bool split_kv;
+  bool resource_cap;
 
   PrefillPlanInfo()
       : padded_batch_size(0),
@@ -714,7 +715,8 @@ struct PrefillPlanInfo {
         s_offset(0),
         block_valid_mask_offset(0),
         enable_cuda_graph(false),
-        split_kv(false) {}
+        split_kv(false),
+        resource_cap(false) {}
 
   // convert PrefillPlanInfo to std::vector<int64_t>
   std::vector<int64_t> ToVector() const {
@@ -732,14 +734,15 @@ struct PrefillPlanInfo {
             s_offset,
             block_valid_mask_offset,
             enable_cuda_graph,
-            split_kv};
+            split_kv,
+            resource_cap};
   }
 
   // From std::vector<int64_t> to PrefillPlanInfo
   void FromVector(const std::vector<int64_t>& vec) {
-    if (vec.size() != 15) {
+    if (vec.size() != 16) {
       std::ostringstream err_msg;
-      err_msg << "PrefillPlanInfo::FromVector: vec.size() should be 15, but got " << vec.size();
+      err_msg << "PrefillPlanInfo::FromVector: vec.size() should be 16, but got " << vec.size();
       FLASHINFER_ERROR(err_msg.str());
     }
     padded_batch_size = vec[0];
@@ -757,6 +760,7 @@ struct PrefillPlanInfo {
     block_valid_mask_offset = vec[12];
     enable_cuda_graph = vec[13];
     split_kv = vec[14];
+    resource_cap = vec[15];
   }
 };
 
